@@ -9,13 +9,36 @@
 
 ```bash
 git clone https://github.com/misaqhaddady/web-monitor.git
-cd web-monitor
-chmod +x install.sh
-./install.sh
-```
 
-- **لینوکس:** اگر Python 3.8+ نباشد دستور نصب را نشان می‌دهد؛ اگر فقط venv نباشد (مثلاً کالی) می‌تواند با `uv` ادامه دهد. اگر با `sudo` اجرا کنید می‌تواند سرویس systemd هم بسازد.
-- **ویندوز:** با **Git Bash** اجرا کنید. اگر Python نبود با `winget` نصب می‌کند (بعدش ترمینال را ببندید و دوباره اجرا کنید). فایل `start.bat` و (اختیاری) Scheduled Task می‌سازد.
+
+APP_ADMIN_USER=admin APP_ADMIN_PASS=admin123 /usr/bin/python3 app.py --init-admin
+
+cd /home/misaq/web-monitor
+APP_ADMIN_USER=admin APP_ADMIN_PASS=admin123 /usr/bin/python3 app.py --init-admin
+#ساخت سرویس 
+
+cat > /etc/systemd/system/webmonitor.service <<'EOF'
+[Unit]
+Description=Web Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=misaq
+WorkingDirectory=/home/misaq/web-monitor
+ExecStart=/usr/bin/python3 /home/misaq/web-monitor/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+chown -R misaq:misaq /home/misaq/web-monitor
+systemctl daemon-reload
+systemctl enable --now webmonitor
+systemctl status webmonitor --no-pager
+
 
 نصب‌کننده FQDN، پورت، و نام‌کاربری/رمز ادمین را می‌پرسد. پنل روی همه‌ی اینترفیس‌ها گوش می‌دهد، پس هم با FQDN و هم با IP باز می‌شود: `http://<fqdn-یا-ip>:8080`
 
