@@ -1,2 +1,36 @@
-# web-monitor
-For Website monitor
+# Web Monitor — مانیتور وب‌سایت‌ها
+
+ساخته‌شده توسط **Hossein Haddady**
+
+پنل تحت وب برای بررسی وضعیت پورت **80** و **443**، کد HTTP صفحه‌ی دلخواه (مثلاً `example.com/app`) و **اعتبار SSL**.
+نیازی به دسترسی به سرور سایت‌ها نیست؛ بررسی از بیرون انجام می‌شود.
+
+## نصب
+
+```bash
+git clone https://github.com/<you>/web-monitor.git
+cd web-monitor
+chmod +x install.sh
+./install.sh
+```
+
+- **لینوکس:** اگر Python 3.8+ / venv نصب نباشد، دستور نصب را نشان می‌دهد و خارج می‌شود (خودتان نصب کنید و دوباره اجرا کنید). اگر با `sudo` اجرا کنید می‌تواند سرویس systemd هم بسازد.
+- **ویندوز:** با **Git Bash** اجرا کنید. اگر Python نبود با `winget` نصب می‌کند (بعدش ترمینال را ببندید و دوباره اجرا کنید). فایل `start.bat` و (اختیاری) Scheduled Task می‌سازد.
+
+نصب‌کننده FQDN، پورت، و نام‌کاربری/رمز ادمین را می‌پرسد. پنل روی همه‌ی اینترفیس‌ها گوش می‌دهد، پس هم با FQDN و هم با IP باز می‌شود: `http://<fqdn-یا-ip>:8080`
+
+## اجرای دستی
+
+```bash
+python -m venv venv && venv/bin/pip install -r requirements.txt   # ویندوز: venv\Scripts\
+APP_ADMIN_USER=admin APP_ADMIN_PASS='رمز-حداقل-8' venv/bin/python app.py --init-admin
+venv/bin/python app.py
+```
+
+## صفحات
+1. **داشبورد** — کارت هر سایت: وضعیت پورت‌های 80/443، کد HTTP، زمان اتصال، SSL (معتبر/نامعتبر و روز مانده)
+2. **مدیریت سایت‌ها** — افزودن/حذف (دامنه یا IP، با مسیر اختیاری)
+3. **تنظیمات** — فاصله‌ی بررسی، تغییر رمز
+
+## نکته‌ی امنیتی
+پنل خودش HTTP ساده است. برای استفاده روی اینترنت پشت Caddy/nginx با TLS قرار دهید.
