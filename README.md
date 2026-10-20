@@ -8,7 +8,7 @@
 ## نصب
 
 ```bash
-git clone https://github.com/<you>/web-monitor.git
+git clone https://github.com/misaqhaddady/web-monitor.git
 cd web-monitor
 chmod +x install.sh
 ./install.sh
