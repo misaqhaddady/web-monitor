@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Web Monitor (by Hossein Haddady) - بررسی وضعیت پورت 80/443، HTTP و SSL وب‌سایت‌ها (ویندوز و لینوکس)."""
 import os, sys, re, json, ssl, socket, sqlite3, secrets, threading, time, http.client
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 from flask import (Flask, request, session, redirect, render_template_string,
@@ -162,6 +162,40 @@ def parse_addr(a):
     return host, "/" + re.sub(r"\s", "", rest)
 
 
+SSL_WARN_DAYS = 30   # کمتر از این تعداد روز => قرمز
+
+
+def _ssl_bad(p):
+    if not p or not p.get("open"):
+        return False
+    if p.get("ssl_ok") is False:
+        return True
+    return bool(p.get("ssl_ok")) and p["ssl_days"] < SSL_WARN_DAYS
+
+
+def ssl_rows():
+    """لیست سایت‌ها به ترتیب نزدیکی انقضای SSL (نامعتبر/منقضی اول)."""
+    out = []
+    for s in sites_view():
+        p = (s["r"] or {}).get("p443")
+        days, msg, exp = None, "", ""
+        if not p or not p.get("open"):
+            lvl, key, msg = "na", 10**9 + 1, "پورت 443 بسته است یا هنوز بررسی نشده"
+        elif p.get("ssl_ok") is False:
+            lvl, key, msg = "bad", -10**6, p.get("ssl_err") or "گواهی نامعتبر یا منقضی"
+        elif p.get("ssl_ok"):
+            days = p["ssl_days"]
+            key = days
+            lvl = "bad" if days < SSL_WARN_DAYS else "ok"
+            exp = (date.today() + timedelta(days=days)).isoformat()
+        else:
+            lvl, key, msg = "na", 10**9, p.get("ssl_err") or "نامشخص"
+        out.append(dict(name=s["name"], host=s["host"], path=s["path"], level=lvl,
+                        days=days, msg=msg, exp=exp, key=key))
+    out.sort(key=lambda x: x["key"])
+    return out
+
+
 def sites_view():
     with db() as c:
         rows = c.execute("SELECT * FROM sites ORDER BY name COLLATE NOCASE").fetchall()
@@ -169,6 +203,7 @@ def sites_view():
     for r in rows:
         d = dict(r)
         d["r"] = json.loads(r["result"]) if r["result"] else None
+        d["ssl_warn"] = _ssl_bad((d["r"] or {}).get("p443"))
         out.append(d)
     return out
 
@@ -192,6 +227,8 @@ h2{color:var(--b1);margin:0 0 16px}
 .sum strong{display:block;font-size:24px;color:var(--b2)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px}
 .card{background:#fff;border:1px solid #d6e2ff;border-top:5px solid #94a3b8;border-radius:14px;padding:16px;box-shadow:0 2px 8px rgba(29,78,216,.07)}
+.card.sw{outline:2px solid var(--bad);outline-offset:-1px}
+.row-bad td{background:#fef2f2}
 .card.up{border-top-color:var(--ok)}.card.partial{border-top-color:var(--warn)}.card.down{border-top-color:var(--bad)}
 .top{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-bottom:10px}
 .top h3{margin:0 0 4px;color:var(--b1);font-size:16px}
@@ -213,7 +250,6 @@ button.mini{padding:4px 12px;font-size:12px}
 button.danger{background:var(--bad)}
 .panel{background:#fff;border:1px solid #d6e2ff;border-radius:14px;padding:18px;margin-bottom:18px}
 .panel h3{margin:0 0 12px;color:var(--b1)}
-textarea{padding:9px 12px;border:1px solid #c5d6ff;border-radius:8px;font-family:inherit;font-size:14px;width:100%;min-height:140px}
 input{padding:9px 12px;border:1px solid #c5d6ff;border-radius:8px;font-family:inherit;font-size:14px;width:100%}
 input:focus{outline:2px solid #93b4ff}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
@@ -232,7 +268,8 @@ th{color:var(--b1);background:#f4f7ff}
 .ft{text-align:center;color:#64748b;font-size:12px;padding:20px 0 28px}
 .about{text-align:center}
 .avatar{width:84px;height:84px;border-radius:50%;background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff;font-size:34px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px}
-.bio{white-space:pre-wrap;text-align:right;line-height:2;margin-top:14px}
+.txt{line-height:2.1;margin:0 0 8px;text-align:justify}
+.kv a,.ft a{color:var(--b2);text-decoration:none}
 """
 
 T = {
@@ -242,6 +279,7 @@ T = {
 {% block page %}
 <header><b>🛰 مانیتور وب</b>
 <nav><a href="/" class="{{ 'on' if request.path=='/' }}">داشبورد</a>
+<a href="/ssl" class="{{ 'on' if request.path=='/ssl' }}">اعتبار SSL</a>
 <a href="/sites" class="{{ 'on' if request.path=='/sites' }}">مدیریت سایت‌ها</a>
 <a href="/settings" class="{{ 'on' if request.path=='/settings' }}">تنظیمات</a>
 <a href="/about" class="{{ 'on' if request.path=='/about' }}">درباره من</a></nav>
@@ -262,7 +300,7 @@ T = {
 <button>ورود</button><small>ساخته‌شده توسط Hossein Haddady</small></form></div>{% endblock %}""",
 
 "cards.html": """{% for s in sites %}
-<div class="card {{ s.state or '' }}">
+<div class="card {{ s.state or '' }}{{ ' sw' if s.ssl_warn }}">
 <div class="top"><div><h3>{{ s.name }}</h3><div class="addr" dir="ltr">{{ s.host }}{{ s.path }}</div></div>
 <span class="badge {{ s.state or '' }}">{{ {'up':'آنلاین','partial':'نیمه‌فعال','down':'آفلاین'}.get(s.state,'در انتظار') }}</span></div>
 {% if s.r %}{% for key,label in [('p80','پورت 80 (HTTP)'),('p443','پورت 443 (HTTPS)')] %}{% set p = s.r[key] %}
@@ -270,7 +308,7 @@ T = {
 <div class="kv"><span>وضعیت HTTP صفحه</span><em dir="ltr">{{ p.http if p.http else '—' }}</em></div>
 {% if p.ms is not none %}<div class="kv"><span>زمان اتصال</span><em dir="ltr">{{ p.ms }} ms</em></div>{% endif %}
 {% if key == 'p443' and p.open %}<div class="kv"><span>SSL</span>
-{% if p.ssl_ok %}<em class="g">فعال و معتبر ({{ p.ssl_days }} روز تا انقضا)</em>
+{% if p.ssl_ok %}<em class="{{ 'r' if p.ssl_days < SSL_WARN else 'g' }}">{{ '⚠ ' if p.ssl_days < SSL_WARN }}فعال و معتبر ({{ p.ssl_days }} روز تا انقضا)</em>
 {% elif p.ssl_ok == false %}<em class="r">نامعتبر</em>{% else %}<em>—</em>{% endif %}</div>
 {% if p.ssl_err %}<div class="err" dir="ltr">{{ p.ssl_err }}</div>{% endif %}{% endif %}
 {% if p.err %}<div class="err" dir="ltr">{{ p.err }}</div>{% endif %}</div>
@@ -286,10 +324,27 @@ T = {
 <div><strong class="g">{{ sites|selectattr('state','equalto','up')|list|length }}</strong>آنلاین</div>
 <div><strong style="color:var(--warn)">{{ sites|selectattr('state','equalto','partial')|list|length }}</strong>نیمه‌فعال</div>
 <div><strong class="r">{{ sites|selectattr('state','equalto','down')|list|length }}</strong>آفلاین</div>
+<div><strong class="r">{{ sites|selectattr('ssl_warn')|list|length }}</strong><a href="/ssl" style="color:inherit;text-decoration:none">SSL نزدیک انقضا</a></div>
 <form method="post" action="/check-all" style="margin-right:auto;align-self:center"><input type="hidden" name="csrf" value="{{ csrf() }}"><button>بررسی همه</button></form></div>
 <div class="grid" id="cards">{% include "cards.html" %}</div>
 <script>setInterval(()=>fetch('/partial/cards').then(r=>r.ok?r.text():null).then(t=>{if(t)document.getElementById('cards').innerHTML=t}),20000)</script>
 {% endblock %}""",
+
+"ssl.html": """{% extends "base.html" %}{% block title %}اعتبار SSL{% endblock %}
+{% block body %}<h2>اعتبار گواهی SSL</h2>
+<div class="sum"><div><strong class="r">{{ rows|selectattr('level','equalto','bad')|list|length }}</strong>نیازمند اقدام (کمتر از {{ SSL_WARN }} روز یا نامعتبر)</div>
+<div><strong class="g">{{ rows|selectattr('level','equalto','ok')|list|length }}</strong>سالم</div>
+<div><strong>{{ rows|selectattr('level','equalto','na')|list|length }}</strong>بدون اطلاعات</div></div>
+<div class="panel"><table><tr><th>#</th><th>سایت</th><th>آدرس</th><th>وضعیت</th><th>روز باقی‌مانده</th><th>تاریخ تقریبی انقضا</th></tr>
+{% for r in rows %}<tr class="{{ 'row-bad' if r.level == 'bad' }}"><td>{{ loop.index }}</td><td>{{ r.name }}</td>
+<td dir="ltr" style="text-align:right">{{ r.host }}{{ r.path }}</td>
+<td>{% if r.level == 'bad' %}<span class="badge down">{{ 'نامعتبر / منقضی' if r.days is none else 'نزدیک انقضا' }}</span>
+{% elif r.level == 'ok' %}<span class="badge up">سالم</span>{% else %}<span class="badge">—</span>{% endif %}
+{% if r.msg %}<div class="err" dir="ltr">{{ r.msg }}</div>{% endif %}</td>
+<td>{% if r.days is not none %}<b class="{{ 'r' if r.level == 'bad' else 'g' }}">{{ r.days }}</b>{% else %}—{% endif %}</td>
+<td dir="ltr" style="text-align:right">{{ r.exp or '—' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">سایتی تعریف نشده</td></tr>{% endfor %}</table>
+<p class="muted" style="margin:12px 0 0">ترتیب: ابتدا گواهی‌های نامعتبر/منقضی، بعد کمترین روز باقی‌مانده. هر گواهی با کمتر از {{ SSL_WARN }} روز اعتبار قرمز می‌شود.</p></div>{% endblock %}""",
 
 "sites.html": """{% extends "base.html" %}{% block title %}مدیریت سایت‌ها{% endblock %}
 {% block body %}<h2>مدیریت سایت‌ها</h2>
@@ -307,16 +362,22 @@ T = {
 
 "about.html": """{% extends "base.html" %}{% block title %}درباره من{% endblock %}
 {% block body %}<h2>درباره من</h2>
-<div class="panel about"><div class="avatar">H</div>
-<h3 style="font-size:20px;margin:0">Hossein Haddady</h3>
-<div class="muted">سازنده‌ی مانیتور وب</div>
-<div class="bio">{{ bio }}</div></div>
-<form class="panel" method="post" action="/about/edit"><h3>ویرایش متن «درباره من»</h3>
-<input type="hidden" name="csrf" value="{{ csrf() }}">
-<textarea name="bio" maxlength="3000">{{ bio }}</textarea>
-<div style="margin-top:10px"><button>ذخیره</button></div></form>
+<div class="panel about"><div class="avatar">س</div>
+<h3 style="font-size:22px;margin:0">سید حسین حدادی</h3>
+<div class="muted" style="margin-top:4px">Hossein Haddady</div>
+<div style="margin-top:10px;font-weight:bold;color:var(--b2)">مشاور ارشد زیرساخت فناوری اطلاعات | شبکه، سرورها و امنیت زیرساخت</div></div>
+<div class="panel"><h3>حوزه تخصص</h3>
+<p class="txt">مشاوره، ارزیابی فنی، ممیزی زیرساخت IT، شناسایی ریسک‌ها و بهبود پایداری سرویس‌های سازمانی</p></div>
+<div class="panel"><h3>اطلاعات تماس</h3>
+<div class="kv"><span>تلفن</span><em dir="ltr"><a href="tel:+989129258935">+989129258935</a></em></div>
+<div class="kv"><span>ایمیل</span><em dir="ltr"><a href="mailto:itmisaq@gmail.com">itmisaq@gmail.com</a></em></div>
+<div class="kv"><span>لینکدین</span><em dir="ltr"><a href="https://www.linkedin.com/in/hossein-haddady-08093972/" target="_blank" rel="noopener noreferrer">hossein-haddady-08093972</a></em></div></div>
+<div class="panel"><h3>معرفی</h3>
+<p class="txt">متخصص ارشد شبکه و زیرساخت فناوری اطلاعات با تجربه عملی در طراحی، پیاده‌سازی، نگهداری و عیب‌یابی زیرساخت‌های سازمانی. دارای تجربه کار با تجهیزات شبکه، زیرساخت سرور و ذخیره‌سازی، بسترهای مجازی‌سازی، سامانه‌های سازمانی و راهکارهای امنیت شبکه.</p>
+<p class="txt">تمرکز حرفه‌ای بر ارزیابی وضعیت موجود زیرساخت، شناسایی نقاط ضعف فنی و امنیتی، تحلیل ریسک‌های عملیاتی، بررسی پایداری سرویس‌ها و ارائه راهکارهای اجرایی متناسب با نیازهای کسب‌وکار است.</p>
+<p class="txt">رویکرد کاری مبتنی بر مستندسازی، تحلیل شواهد فنی، اولویت‌بندی مشکلات بر اساس میزان ریسک و اهمیت کسب‌وکار و ارائه پیشنهادهای اصلاحی قابل اجرا و قابل پیگیری است.</p></div>
 <div class="panel"><h3>درباره‌ی پروژه</h3>
-<p class="muted" style="line-height:2">مانیتور وب یک ابزار سبک و متن‌باز برای بررسی وضعیت پورت‌های 80 و 443، کد HTTP صفحه‌ها و اعتبار SSL وب‌سایت‌هاست؛ بدون نیاز به دسترسی به سرور سایت‌ها و قابل نصب روی ویندوز و لینوکس.</p></div>{% endblock %}""",
+<p class="txt muted">مانیتور وب یک ابزار سبک برای بررسی وضعیت پورت‌های 80 و 443، کد HTTP صفحه‌ها و اعتبار SSL وب‌سایت‌هاست؛ بدون نیاز به دسترسی به سرور سایت‌ها و قابل نصب روی ویندوز و لینوکس.</p></div>{% endblock %}""",
 
 "settings.html": """{% extends "base.html" %}{% block title %}تنظیمات{% endblock %}
 {% block body %}<h2>تنظیمات</h2>
@@ -348,6 +409,7 @@ def csrf():
 
 
 app.jinja_env.globals["csrf"] = csrf
+app.jinja_env.globals["SSL_WARN"] = SSL_WARN_DAYS
 
 
 @app.before_request
@@ -407,6 +469,12 @@ def dashboard():
 @login_required
 def partial_cards():
     return render_template_string('{% include "cards.html" %}', sites=sites_view())
+
+
+@app.route("/ssl")
+@login_required
+def ssl_page():
+    return render_template_string('{% extends "ssl.html" %}', rows=ssl_rows())
 
 
 @app.route("/sites")
@@ -488,21 +556,10 @@ def set_password():
     return redirect("/settings")
 
 
-DEFAULT_BIO = "سلام! من Hossein Haddady هستم، سازنده‌ی مانیتور وب.\nبرای تغییر این متن از فرم پایین همین صفحه استفاده کنید."
-
-
 @app.route("/about")
 @login_required
 def about():
-    return render_template_string('{% extends "about.html" %}', bio=get_setting("bio", DEFAULT_BIO))
-
-
-@app.post("/about/edit")
-@login_required
-def about_edit():
-    set_setting("bio", request.form.get("bio", "").strip()[:3000] or DEFAULT_BIO)
-    flash("ذخیره شد.")
-    return redirect("/about")
+    return render_template_string('{% extends "about.html" %}')
 
 
 @app.route("/api/status")
