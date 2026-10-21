@@ -9,11 +9,7 @@
 
 ```bash
 git clone https://github.com/misaqhaddady/web-monitor.git
-
-
-APP_ADMIN_USER=admin APP_ADMIN_PASS=admin123 /usr/bin/python3 app.py --init-admin
-
-cd /home/misaq/web-monitor
+cd /web-monitor
 APP_ADMIN_USER=admin APP_ADMIN_PASS=admin123 /usr/bin/python3 app.py --init-admin
 #ساخت سرویس 
 
@@ -25,16 +21,16 @@ Wants=network-online.target
 
 [Service]
 User=misaq
-WorkingDirectory=/home/misaq/web-monitor
-ExecStart=/usr/bin/python3 /home/misaq/web-monitor/app.py
+WorkingDirectory="your Directory"/web-monitor
+ExecStart=/usr/bin/python3 "your Directory"/web-monitor/app.py
 Restart=always
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-chown -R misaq:misaq /home/misaq/web-monitor
+# پرمیشن های لازم
+chown -R misaq:misaq "your Directory"/web-monitor
 systemctl daemon-reload
 systemctl enable --now webmonitor
 systemctl status webmonitor --no-pager
